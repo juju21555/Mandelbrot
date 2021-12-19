@@ -8,13 +8,33 @@
 #define SIZE   1024
 
 unsigned char pixels[SIZE * SIZE * 3];
+int POWER = 2;
 
-float R_F2(float a, float r, float c){
-    return a + r*r - c*c ;
+
+double R_F(double a, double r, double c){
+    switch (POWER){
+        case 2:
+            return a + r*r - c*c;
+        case 3:
+            return a + r*r*r - 3*r*c*c;
+        case 4:
+            return a + r*r*r*r - 6*r*r*c*c + c*c*c*c;
+        default:
+            return 0;
+    }
 }
 
-float I_F2(float b, float r, float c){
-    return b + 2*r*c;
+double I_F(double b, double r, double c){
+    switch (POWER){
+        case 2:
+            return b + 2*r*c;
+        case 3:
+            return b + 3*r*r*c - c*c*c + b;
+        case 4:
+            return b - 4*r*c*c*c + 4*r*r*r*c;
+        default:
+            return 0;
+    }
 }
 
 char characterGrayScale(int grayScale)
@@ -206,8 +226,8 @@ void MPI_CALC_Mandelbrot_Spiral(double center_x, double center_y, double size, i
                 im = c_i;
 
                 while (n < 255 && (re*re + im*im < 4)){
-                    tmp = R_F2(c_r, re, im);
-                    im = I_F2(c_i, re, im);
+                    tmp = R_F(c_r, re, im);
+                    im = I_F(c_i, re, im);
                     re = tmp;
                     n++;
                 }
@@ -309,8 +329,8 @@ void MPI_CALC_Julia_Spiral(double center_x, double center_y, double size, int ra
                 im = size*(j*1./SIZE-0.5);
 
                 while (n < 255 && (re*re + im*im < 4)){
-                    tmp = R_F2(c_r, re, im);
-                    im = I_F2(c_i, re, im);
+                    tmp = R_F(c_r, re, im);
+                    im = I_F(c_i, re, im);
                     re = tmp;
                     n++;
                 }
@@ -366,8 +386,8 @@ void MPI_CALC_Mandelbrot(double center_x, double center_y, double size, int rank
                     im = c_i;
 
                     while (n < 255 && (re*re + im*im < 4)){
-                        tmp = R_F2(c_r, re, im);
-                        im = I_F2(c_i, re, im);
+                        tmp = R_F(c_r, re, im);
+                        im = I_F(c_i, re, im);
                         re = tmp;
                         n++;
                     }
@@ -382,8 +402,6 @@ void MPI_CALC_Mandelbrot(double center_x, double center_y, double size, int rank
     MPI_Gather( T,      (SIZE/TOTAL_CORE) * SIZE,      MPI_INT,        // SENDER
                 T_ALL,  (SIZE/TOTAL_CORE) * SIZE,      MPI_INT,        // RECEIVER
                 ROOT,   MPI_COMM_WORLD);
-    
-
 }
 
 int main(int argc, char** argv) {
@@ -393,6 +411,13 @@ int main(int argc, char** argv) {
     int ROOT = 0;
     int numtasks, rank, len;
     char hostname[MPI_MAX_PROCESSOR_NAME];
+
+    if (argc == 2){
+        int p = argv[1][0] - '0';
+        if (p >= 2 && p <= 4){
+            POWER = p;
+        }
+    }
 
     int * T, * T_ALL, * BUFF_X, * BUFF_Y;
 
@@ -452,8 +477,9 @@ int main(int argc, char** argv) {
     int xMouse, yMouse;
 
     unsigned hold=0, isOpen=1, isMandelbrot=1;
-    float cx, cy;
+    double cx, cy;
 
+    //MPI_CALC_Mandelbrot(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL);
     MPI_CALC_Mandelbrot_Spiral(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL, BUFF_X, BUFF_Y);
     render(pRenderer, T_ALL);
 
@@ -461,6 +487,7 @@ int main(int argc, char** argv) {
         if (rank!=ROOT){
             MPI_Bcast(data, 4, MPI_DOUBLE, ROOT, MPI_COMM_WORLD);
             if (data[3]==0.){
+                //MPI_CALC_Mandelbrot(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL);
                 MPI_CALC_Mandelbrot_Spiral(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL, BUFF_X, BUFF_Y);
             }
             else if (data[3]==1.){
@@ -514,6 +541,7 @@ int main(int argc, char** argv) {
                             t1 = clock();
                             MPI_Bcast(data, 4, MPI_DOUBLE, ROOT, MPI_COMM_WORLD);
                             
+                            //MPI_CALC_Mandelbrot(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL);
                             MPI_CALC_Mandelbrot_Spiral(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL, BUFF_X, BUFF_Y);
                             t2 = clock();
                             t = t2-t1;
@@ -530,6 +558,7 @@ int main(int argc, char** argv) {
                         if (!isMandelbrot){
                             data[3] = 1. - data[3];
                             MPI_Bcast(data, 4, MPI_DOUBLE, ROOT, MPI_COMM_WORLD);
+                            //MPI_CALC_Mandelbrot(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL);
                             MPI_CALC_Mandelbrot_Spiral(data[0], data[1], data[2], rank, ROOT, numtasks, T, T_ALL, BUFF_X, BUFF_Y);
                             render(pRenderer, T_ALL);
                             hold = 0;

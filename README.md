@@ -22,13 +22,13 @@ apt-get install nvidia-cuda-toolkit
 Pour visualiser l'ensemble de Mandelbrot sur CPU (MPI) :
 ```bash
 mpicc mandelbrot_cpu.c -o mandelbrot_cpu.o -lSDL2
-mpirun -np <nb de coeurs> mandelbrot_cpu.o
+mpirun -np <nb de coeurs> mandelbrot_cpu.o <puissance (allant de 2 à 4)>
 ```
 		
 Pour visualiser l'ensemble de Mandelbrot sur GPU (CUDA) :
 ```bash
 nvcc mandelbrot_gpu.cu -o mandelbrot_gpu.o -lSDL2 -lcublas
-./mandelbrot_gpu.o
+./mandelbrot_gpu.o <puissance (allant de 2 à 4)>
 ```
 
 Ou bien 

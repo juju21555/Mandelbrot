@@ -1,13 +1,11 @@
 #include <stdio.h>
-#include <SDL2/SDL.h>
 #include <time.h>
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-#undef main
+#include <SDL2/SDL.h>
 
 #define SIZE   1024
 
 unsigned char pixels[SIZE * SIZE * 3];
+
 
 unsigned char getColorR(int t){
     int t_i = (t/60) % 6;
@@ -121,7 +119,34 @@ void render(SDL_Renderer*  pRenderer, int *T_ALL){
 }
 
 
-__global__ void JULIA_GPU(int *T, double size, double centerX, double centerY){
+__device__ double R_F(int POWER, double a, double r, double c){
+    switch (POWER){
+        case 2:
+            return a + r*r - c*c;
+        case 3:
+            return a + r*r*r - 3*r*c*c;
+        case 4:
+            return a + r*r*r*r - 6*r*r*c*c + c*c*c*c;
+        default:
+            return 0;
+    }
+}
+
+__device__ double I_F(int POWER, double b, double r, double c){
+    switch (POWER){
+        case 2:
+            return b + 2*r*c;
+        case 3:
+            return b + 3*r*r*c - c*c*c + b;
+        case 4:
+            return b - 4*r*c*c*c + 4*r*r*r*c;
+        default:
+            return 0;
+    }
+}
+
+
+__global__ void JULIA_GPU(int *T, double size, double centerX, double centerY, int POWER){
   int i = blockIdx.x*blockDim.x+threadIdx.x;
   int j = blockIdx.y*blockDim.y+threadIdx.y;
   double c_r = centerX;
@@ -131,15 +156,15 @@ __global__ void JULIA_GPU(int *T, double size, double centerX, double centerY){
   double tmp = 0.0;
   int n = 0;
   while (n < 255 && (z_r*z_r + z_c*z_c) < 4){
-    tmp = z_r*z_r - z_c*z_c + c_r;
-    z_c = 2 * z_r*z_c + c_c;
+    tmp = R_F(POWER, c_r, z_r, z_c);
+    z_c = I_F(POWER, c_c, z_r, z_c);
     z_r = tmp;
     n++;
   }
   T[j*SIZE+i] = n;
 }
 
-__global__ void MANDELBROT_GPU(int *T, double size, double centerX, double centerY){
+__global__ void MANDELBROT_GPU(int *T, double size, double centerX, double centerY, int POWER){
   int i = blockIdx.x*blockDim.x+threadIdx.x;
   int j = blockIdx.y*blockDim.y+threadIdx.y;
   double c_r = size*(i*1.0/SIZE - 0.5) + centerX;
@@ -147,8 +172,8 @@ __global__ void MANDELBROT_GPU(int *T, double size, double centerX, double cente
   double z_r = 0.0, tmp = 0.0, z_c = 0.0;
   int n = 0;
   while (n < 255 && (z_r*z_r + z_c*z_c) < 4){
-    tmp = z_r*z_r - z_c*z_c + c_r;
-    z_c = 2 * z_r*z_c + c_c;
+    tmp = R_F(POWER, c_r, z_r, z_c);
+    z_c = I_F(POWER, c_c, z_r, z_c);
     z_r = tmp;
     n++;
   }
@@ -156,13 +181,21 @@ __global__ void MANDELBROT_GPU(int *T, double size, double centerX, double cente
 }
 
 
-int main(void)
-{
+int main(int argc, char** argv){
   int *T, *d_T;
 
+  int POWER = 2;
 
+  if (argc == 2){
+      int p = argv[1][0] - '0';
+      if (p >= 2 && p <= 4){
+          POWER = p;
+      }
+  }
+  
   dim3 numBlocks(32, 32);
   dim3 threadsPerBlock(32, 32);
+  clock_t t1, t2, t;
 
   T = (int*)malloc(SIZE*SIZE*sizeof(int));
 
@@ -174,7 +207,7 @@ int main(void)
 
   cudaMemcpy(d_T, T, SIZE*SIZE*sizeof(int), cudaMemcpyHostToDevice);
 
-  MANDELBROT_GPU<<<numBlocks, threadsPerBlock>>>(d_T, 3.0, 0.0, 0.0);
+  MANDELBROT_GPU<<<numBlocks, threadsPerBlock>>>(d_T, 3.0, 0.0, 0.0, POWER);
 
   cudaMemcpy(T, d_T, SIZE*SIZE*sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -218,7 +251,7 @@ int main(void)
 	      	cx = size*(xMouse*1.0/SIZE - 0.5) + old_cx;
 	      	cy = size*(yMouse*1.0/SIZE - 0.5) + old_cy;
   	
-          JULIA_GPU<<<numBlocks, threadsPerBlock>>>(d_T, 3., cx, cy);
+          JULIA_GPU<<<numBlocks, threadsPerBlock>>>(d_T, 3., cx, cy, POWER);
           cudaMemcpy(T, d_T, SIZE*SIZE*sizeof(int), cudaMemcpyDeviceToHost);
           render(pRenderer, T);
   	}
@@ -245,8 +278,12 @@ int main(void)
                 cy    = 0.;
               }
 
-              MANDELBROT_GPU<<<numBlocks, threadsPerBlock>>>(d_T, size, cx, cy);
+              t1 = clock();
+              MANDELBROT_GPU<<<numBlocks, threadsPerBlock>>>(d_T, size, cx, cy, POWER);
               cudaMemcpy(T, d_T, SIZE*SIZE*sizeof(int), cudaMemcpyDeviceToHost);
+              t2 = clock();
+              t = t2-t1;
+              printf("Temps Mandelbrot MPI : %i ms\n", (int) (t * 1000 / CLOCKS_PER_SEC));
               render(pRenderer, T);
 
               old_cx = cx;
@@ -259,8 +296,12 @@ int main(void)
 
           case SDL_MOUSEBUTTONUP:
             if (!isMandelbrot){
-              MANDELBROT_GPU<<<numBlocks, threadsPerBlock>>>(d_T, size, old_cx, old_cy);
+              t1 = clock();
+              MANDELBROT_GPU<<<numBlocks, threadsPerBlock>>>(d_T, size, old_cx, old_cy, POWER);
               cudaMemcpy(T, d_T, SIZE*SIZE*sizeof(int), cudaMemcpyDeviceToHost);
+              t2 = clock();
+              t = t2-t1;
+              printf("Temps Mandelbrot MPI : %i ms\n", (int) (t * 1000 / CLOCKS_PER_SEC));
               render(pRenderer, T);
               hold = 0;
             }
